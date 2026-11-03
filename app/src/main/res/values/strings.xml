@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Chess Bot</string>
+    <string name="acc_desc">Нужна, чтобы бот мог нажимать на фигуры вместо тебя (тап «откуда» и «куда»).</string>
+</resources>
