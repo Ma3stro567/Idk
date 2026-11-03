@@ -330,9 +330,24 @@ class BotService : Service() {
             val reader = BoardReader()
             reader.learn(bmp, rect, white)
             val board = Board()
-            val bad = mismatch(reader.read(bmp, rect, white), placement(board))
+            val first = reader.read(bmp, rect, white)
+            val bad = mismatch(first, placement(board))
             if (bad > 2) {
-                setStatus("Не вижу начальную позицию (ошибок: $bad). Проверь калибровку, цвет и что партия новая")
+                // показываем, что бот видит (как на экране: сверху вниз), '.' = пусто, '?' = не понял
+                val sb = StringBuilder()
+                for (row in 0..7) {
+                    for (col in 0..7) {
+                        val file = if (white) col else 7 - col
+                        val rank = if (white) 7 - row else row
+                        val c = first[rank * 8 + file]
+                        sb.append(if (c == ' ') '.' else c).append(' ')
+                    }
+                    sb.append('\n')
+                }
+                setStatus(
+                    "Не вижу начальную позицию (ошибок: $bad из 32). Кадр ${bmp.width}x${bmp.height}, " +
+                        "доска $rect. Проверь калибровку, цвет и что партия новая. Бот видит:\n$sb"
+                )
                 running = false
                 return
             }
