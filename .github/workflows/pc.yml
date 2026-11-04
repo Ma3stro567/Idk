@@ -1,0 +1,53 @@
+name: Build PC (Windows)
+on:
+  push:
+    paths:
+      - "pc/**"
+      - ".github/workflows/pc.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r pc/requirements.txt pyinstaller
+
+      - name: Import check
+        working-directory: pc
+        run: python -c "import vision, chessbot_pc; print('imports ok')"
+
+      - name: Download Stockfish (Windows, AVX2)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/official-stockfish/Stockfish/releases/download/sf_17.1/stockfish-windows-x86-64-avx2.zip" -OutFile sf.zip
+          Expand-Archive sf.zip -DestinationPath sf
+          $exe = Get-ChildItem sf -Recurse -Filter "stockfish*.exe" | Select-Object -First 1
+          Copy-Item $exe.FullName pc\stockfish.exe
+          Get-Item pc\stockfish.exe | Select-Object Name, Length
+
+      - name: Build single exe (Stockfish inside)
+        working-directory: pc
+        run: pyinstaller --onefile --noconsole --name ChessBot --add-data "templates_chesscom.npz;." --add-binary "stockfish.exe;." chessbot_pc.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChessBot-PC
+          path: pc/dist/ChessBot.exe
+
+      - name: Publish release with ChessBot.exe
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-pc
+          name: ChessBot PC (latest)
+          files: pc/dist/ChessBot.exe
