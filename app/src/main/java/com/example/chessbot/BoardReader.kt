@@ -2,6 +2,9 @@ package com.example.chessbot
 
 import android.graphics.Bitmap
 import android.graphics.Rect
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -68,6 +71,57 @@ class BoardReader {
 
     private fun rowCol(file: Int, rank: Int, white: Boolean): Pair<Int, Int> =
         if (white) Pair(7 - rank, file) else Pair(rank, 7 - file)
+
+    val ready: Boolean get() = templates.size == 12
+
+    fun clear() = templates.clear()
+
+    fun save(f: File) {
+        DataOutputStream(f.outputStream().buffered()).use { o ->
+            o.writeInt(templates.size)
+            for ((c, t) in templates) {
+                o.writeChar(c.code)
+                for (v in t.px) o.writeInt(v)
+                for (b in t.isBg) o.writeBoolean(b)
+            }
+        }
+    }
+
+    fun load(f: File): Boolean {
+        try {
+            if (!f.exists()) return false
+            DataInputStream(f.inputStream().buffered()).use { i ->
+                val n = i.readInt()
+                val m = HashMap<Char, Template>()
+                repeat(n) {
+                    val c = i.readChar()
+                    val px = IntArray(N * N) { i.readInt() }
+                    val bg = BooleanArray(N * N) { i.readBoolean() }
+                    m[c] = Template(px, bg)
+                }
+                if (m.size == 12) {
+                    templates.clear()
+                    templates.putAll(m)
+                    return true
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return false
+    }
+
+    /** Белые внизу? Сравниваем среднюю высоту белых и чёрных фигур на экране (при отображении «белые снизу»). */
+    fun whiteAtBottom(obs: CharArray): Boolean? {
+        var ws = 0.0; var wn = 0; var bs = 0.0; var bn = 0
+        for (i in 0 until 64) {
+            val c = obs[i]
+            if (c == ' ' || c == '?') continue
+            val row = 7 - i / 8 // экранная строка при white=true
+            if (c.isUpperCase()) { ws += row; wn++ } else { bs += row; bn++ }
+        }
+        if (wn == 0 || bn == 0) return null
+        return ws / wn >= bs / bn
+    }
 
     /** [сумма яркости, число пикселей] фигуры в клетке (для определения, белые внизу или чёрные). */
     fun pieceLuma(bmp: Bitmap, rect: Rect, row: Int, col: Int): FloatArray {

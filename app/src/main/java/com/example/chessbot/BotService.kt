@@ -13,6 +13,7 @@ import android.graphics.PointF
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import java.io.File
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -82,7 +83,7 @@ class BotService : Service() {
         projection = proj
         setupCapture(proj)
         setupUi()
-        setStatus("Готов. Калибр. → открой новую партию → Старт")
+        setStatus("Готов. Открой партию и жми «Старт: мой ход» (или «его ход», если сейчас ходит соперник)")
         return START_NOT_STICKY
     }
 
@@ -188,9 +189,12 @@ class BotService : Service() {
         }
         statusView = st
         col.addView(st)
+        val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row1.addView(btn("Старт: мой ход") { startGame(false) })
+        row1.addView(btn("Старт: его ход") { startGame(true) })
+        col.addView(row1)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         row.addView(btn("Калибр.") { calibrate() })
-        row.addView(btn("Старт") { startGame() })
         row.addView(btn("Стоп") { stopGame() })
         val ab = btn(if (Cfg.auto(this)) "Авто: вкл" else "Авто: выкл") {
             Cfg.setAuto(this, !Cfg.auto(this))
@@ -233,7 +237,7 @@ class BotService : Service() {
             ui.post {
                 calib?.let { wm.removeView(it) }
                 calib = null
-                setStatus("Доска откалибрована. Открой НОВУЮ партию и жми Старт")
+                setStatus("Доска откалибрована. Жми «Старт»")
             }
         }
         calib = cv
@@ -247,10 +251,10 @@ class BotService : Service() {
         overlay?.clear()
     }
 
-    private fun startGame() {
+    private fun startGame(opponentFirst: Boolean) {
         if (running) return
         running = true
-        worker = Thread { runBot() }.also { it.isDaemon = true; it.start() }
+        worker = Thread { runBot(opponentFirst) }.also { it.isDaemon = true; it.start() }
     }
 
     private fun nap(ms: Long) {
@@ -316,7 +320,44 @@ class BotService : Service() {
         }
     }
 
-    private fun runBot() {
+    /** Позиция с экрана выглядит как настоящая: все фигуры узнаны и по одному королю каждого цвета. */
+    private fun midGameOk(obs: CharArray): Boolean {
+        if (obs.count { it == '?' } > 3) return false
+        return obs.count { it == 'K' } == 1 && obs.count { it == 'k' } == 1
+    }
+
+    private fun gridText(obs: CharArray, white: Boolean): String {
+        val sb = StringBuilder()
+        for (row in 0..7) {
+            for (col in 0..7) {
+                val file = if (white) col else 7 - col
+                val rank = if (white) 7 - row else row
+                val c = obs[rank * 8 + file]
+                sb.append(if (c == ' ') '.' else c).append(' ')
+            }
+            sb.append('\n')
+        }
+        return sb.toString()
+    }
+
+    private fun fenOf(obs: CharArray, whiteToMove: Boolean): String {
+        val sb = StringBuilder()
+        for (rank in 7 downTo 0) {
+            var empty = 0
+            for (file in 0..7) {
+                val c = obs[rank * 8 + file]
+                if (c == ' ') empty++ else {
+                    if (empty > 0) { sb.append(empty); empty = 0 }
+                    sb.append(c)
+                }
+            }
+            if (empty > 0) sb.append(empty)
+            if (rank > 0) sb.append('/')
+        }
+        return sb.toString() + (if (whiteToMove) " w" else " b") + " - - 0 1"
+    }
+
+    private fun runBot(opponentFirst: Boolean) {
         try {
             var bmp: Bitmap? = null
             for (i in 0 until 20) {
@@ -339,39 +380,57 @@ class BotService : Service() {
                 return
             }
             val reader = BoardReader()
-            val white = when (Cfg.colorMode(this)) {
-                1 -> true
-                2 -> false
-                else -> BoardFinder.whiteAtBottom(bmp, rect)
+            val tplFile = File(filesDir, "tpl.bin")
+            val hadTemplates = reader.load(tplFile)
+            val expectedStart = placement(Board())
+            val modeWhite: Boolean? = when (Cfg.colorMode(this)) { 1 -> true; 2 -> false; else -> null }
+
+            var white: Boolean
+            var obs: CharArray? = null
+            var startPos = false
+            if (hadTemplates) {
+                val tmp = reader.read(bmp, rect, true)
+                white = modeWhite ?: reader.whiteAtBottom(tmp) ?: BoardFinder.whiteAtBottom(bmp, rect)
+                obs = reader.read(bmp, rect, white)
+                startPos = mismatch(obs, expectedStart) <= 2
+            } else {
+                white = modeWhite ?: BoardFinder.whiteAtBottom(bmp, rect)
             }
+
+            val board = Board()
+            if (!hadTemplates || (!startPos && !midGameOk(obs!!))) {
+                // шаблонов нет (или они не подходят): учимся на начальной позиции
+                reader.learn(bmp, rect, white)
+                obs = reader.read(bmp, rect, white)
+                val bad = mismatch(obs, expectedStart)
+                if (bad > 2) {
+                    reader.clear()
+                    setStatus(
+                        "Не узнаю фигуры. Бот должен ОДИН РАЗ увидеть начальную позицию (любая новая партия " +
+                            "или редактор доски, где фигуры стоят как в начале), чтобы запомнить вид фигур. " +
+                            "Дальше можно стартовать посреди партии. (ошибок: $bad из 32, кадр ${bmp.width}x${bmp.height}, " +
+                            "доска $rect, я за ${if (white) "белых" else "чёрных"}). Бот видит:\n${gridText(obs, white)}"
+                    )
+                    running = false
+                    return
+                }
+                reader.save(tplFile)
+                startPos = true
+            }
+
             val mySide = if (white) Side.WHITE else Side.BLACK
             val cell = rect.width() / 8f
-            setStatus((if (found != null) "Доска найдена" else "Доска из калибровки") +
-                ", я за ${if (white) "белых" else "чёрных"}")
-
-            reader.learn(bmp, rect, white)
-            val board = Board()
-            val first = reader.read(bmp, rect, white)
-            val bad = mismatch(first, placement(board))
-            if (bad > 2) {
-                // показываем, что бот видит (как на экране: сверху вниз), '.' = пусто, '?' = не понял
-                val sb = StringBuilder()
-                for (row in 0..7) {
-                    for (col in 0..7) {
-                        val file = if (white) col else 7 - col
-                        val rank = if (white) 7 - row else row
-                        val c = first[rank * 8 + file]
-                        sb.append(if (c == ' ') '.' else c).append(' ')
-                    }
-                    sb.append('\n')
-                }
-                setStatus(
-                    "Не вижу начальную позицию (ошибок: $bad из 32). Кадр ${bmp.width}x${bmp.height}, " +
-                        "доска $rect. Проверь калибровку, цвет и что партия новая. Бот видит:\n$sb"
-                )
-                running = false
-                return
+            if (!startPos) {
+                // партия уже идёт: собираем позицию с экрана
+                val myTurn = !opponentFirst
+                val whiteToMove = (mySide == Side.WHITE) == myTurn
+                board.loadFromFen(fenOf(obs!!, whiteToMove))
             }
+            setStatus(
+                (if (found != null) "Доска найдена" else "Доска из калибровки") +
+                    ", я за ${if (white) "белых" else "чёрных"}" +
+                    (if (startPos) ", новая партия" else ", партия с середины (рокировка не учитывается)")
+            )
 
             if (engine == null) {
                 setStatus("Запускаю Stockfish…")
