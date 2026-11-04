@@ -276,18 +276,27 @@ class BotService : Service() {
         return true
     }
 
+    /** Случайная точка внутри клетки: чаще около центра, но не строго в нём (не дальше 30% клетки). */
+    private fun humanPoint(p: PointF, cell: Float): PointF {
+        val rnd = java.util.Random()
+        val dx = (rnd.nextGaussian() * 0.12).coerceIn(-0.3, 0.3).toFloat() * cell
+        val dy = (rnd.nextGaussian() * 0.12).coerceIn(-0.3, 0.3).toFloat() * cell
+        return PointF(p.x + dx, p.y + dy)
+    }
+
     private fun clickMove(m: Move, r: Rect, white: Boolean) {
-        val a = center(r, white, idx(m.from))
-        val b = center(r, white, idx(m.to))
+        val cell = r.width() / 8f
+        val a = humanPoint(center(r, white, idx(m.from)), cell)
+        val b = humanPoint(center(r, white, idx(m.to)), cell)
         if (!tap(a)) {
             setStatus("Включи службу «Chess Bot» в спец. возможностях!")
             return
         }
-        nap(450)
+        nap(280 + (Math.random() * 520).toLong()) // пауза между «взял» и «поставил» каждый раз разная
         tap(b)
         if (m.promotion != Piece.NONE) {
-            nap(600)
-            tap(b) // ферзь — первый вариант в окне превращения, он на поле назначения
+            nap(450 + (Math.random() * 450).toLong())
+            tap(humanPoint(center(r, white, idx(m.to)), cell)) // ферзь — первый вариант в окне превращения, он на поле назначения
         }
     }
 
