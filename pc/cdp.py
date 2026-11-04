@@ -36,7 +36,13 @@ def launch_browser(profile_dir, url="https://www.chess.com/play/computer"):
         raise RuntimeError("Chrome/Edge не найден в стандартных папках")
     os.makedirs(profile_dir, exist_ok=True)
     subprocess.Popen([path, f"--remote-debugging-port={PORT}", "--remote-allow-origins=*",
-                      f"--user-data-dir={profile_dir}", "--no-first-run", "--no-default-browser-check", url])
+                      f"--user-data-dir={profile_dir}", "--no-first-run", "--no-default-browser-check",
+                      # не «усыплять» окно, когда оно закрыто другими окнами или не в фокусе
+                      "--disable-features=CalculateNativeWinOcclusion",
+                      "--disable-backgrounding-occluded-windows",
+                      "--disable-renderer-backgrounding",
+                      "--disable-background-timer-throttling",
+                      url])
 
 
 def available(port=PORT):
@@ -67,7 +73,18 @@ class CDP:
         tab = next((t for t in tabs if any(p in t.get("url", "") for p in prefer)), tabs[0])
         self.title = tab.get("title", "")
         self.ws = websocket.create_connection(tab["webSocketDebuggerUrl"], timeout=15, suppress_origin=True)
+        self.keep_alive()
         return self.title
+
+    def keep_alive(self):
+        """Страница считает, что она в фокусе и видима, даже когда окно в фоне."""
+        for method, params in (("Page.enable", {}),
+                               ("Emulation.setFocusEmulationEnabled", {"enabled": True}),
+                               ("Page.setWebLifecycleState", {"state": "active"})):
+            try:
+                self.call(method, params)
+            except Exception:
+                pass
 
     def close(self):
         try:
