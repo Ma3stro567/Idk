@@ -23,6 +23,8 @@ class MainActivity : Activity() {
     private val reqProjection = 1001
     private lateinit var elo: EditText
     private lateinit var ms: EditText
+    private lateinit var minS: EditText
+    private lateinit var maxS: EditText
     private lateinit var rbAuto: RadioButton
     private lateinit var rbWhite: RadioButton
     private lateinit var rbBlack: RadioButton
@@ -73,6 +75,23 @@ class MainActivity : Activity() {
             setText(Cfg.ms(this@MainActivity).toString())
         }
         col.addView(ms)
+        col.addView(tv("Пауза перед ходом, секунд — от и до (0 и 0 = без паузы). Время выбирается случайно из диапазона:", 13f))
+        val pr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        minS = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            hint = "от"
+            setText(Cfg.minSec(this@MainActivity).toString())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        maxS = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            hint = "до"
+            setText(Cfg.maxSec(this@MainActivity).toString())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        pr.addView(minS)
+        pr.addView(maxS)
+        col.addView(pr)
         col.addView(tv("Я играю за:", 13f))
         val rg = RadioGroup(this).apply { orientation = LinearLayout.HORIZONTAL }
         rbAuto = RadioButton(this).apply { text = "Авто"; id = View.generateViewId() }
@@ -115,7 +134,9 @@ class MainActivity : Activity() {
             elo.text.toString().toIntOrNull() ?: 0,
             (ms.text.toString().toIntOrNull() ?: 1000).coerceIn(100, 60000),
             if (rbWhite.isChecked) 1 else if (rbBlack.isChecked) 2 else 0,
-            auto.isChecked
+            auto.isChecked,
+            (minS.text.toString().toIntOrNull() ?: 0).coerceIn(0, 120),
+            (maxS.text.toString().toIntOrNull() ?: 0).coerceIn(0, 120)
         )
         val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         @Suppress("DEPRECATION")

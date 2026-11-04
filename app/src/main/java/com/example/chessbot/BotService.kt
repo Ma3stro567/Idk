@@ -493,6 +493,19 @@ class BotService : Service() {
                             (promo.isEmpty() || it.promotion.fenSymbol.lowercase() == promo)
                     }
                     if (move == null) { setStatus("Ход движка не найден среди легальных: $u"); break }
+                    // случайная пауза перед ходом из заданного диапазона (иногда чуть дольше)
+                    val lo = Cfg.minSec(this)
+                    val hi = maxOf(Cfg.maxSec(this), lo)
+                    if (hi > 0) {
+                        var secs = lo + Math.random() * (hi - lo)
+                        if (Math.random() < 0.1) secs = hi + Math.random() * hi * 0.2
+                        val until = System.currentTimeMillis() + (secs * 1000).toLong()
+                        while (alive && running && System.currentTimeMillis() < until) {
+                            setStatus("Ход найден, жду ${((until - System.currentTimeMillis()) / 1000) + 1} с…")
+                            nap(250)
+                        }
+                        if (!alive || !running) break
+                    }
                     pending = move
                     pendingSince = System.currentTimeMillis()
                     val a = center(rect, white, idx(move.from))
