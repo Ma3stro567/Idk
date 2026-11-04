@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -21,6 +22,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.provider.MediaStore
 import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.MotionEvent
@@ -300,6 +302,22 @@ class BotService : Service() {
         }
     }
 
+    /** Сохраняет кадр, который видит бот, в Галерею (Pictures/ChessBot) — для диагностики. */
+    private fun saveDebug(b: Bitmap) {
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val cv = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, "chessbot_${System.currentTimeMillis()}.png")
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ChessBot")
+                }
+                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv) ?: return
+                contentResolver.openOutputStream(uri)?.use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     /** Выполняет блокирующий вызов с таймаутом, чтобы бот не «висел» бесконечно. */
     private fun <T> timed(sec: Long, f: () -> T): T {
         val ex = java.util.concurrent.Executors.newSingleThreadExecutor()
@@ -382,7 +400,7 @@ class BotService : Service() {
             }
 
             setStatus("Ищу доску на экране…")
-            var found = BoardFinder.find(bmp)
+            var found = BoardFinder.find(bmp) ?: BoardFinder.find(bmp, relaxed = true)
             var tries = 0
             while (found == null && tries < 3 && running) {
                 tries++
@@ -390,12 +408,17 @@ class BotService : Service() {
                 val nb = grab(true)
                 if (nb != null) {
                     bmp = nb
-                    found = BoardFinder.find(nb)
+                    found = BoardFinder.find(nb) ?: BoardFinder.find(nb, relaxed = true)
                 }
             }
             val frame: Bitmap = bmp ?: return
             if (found == null) {
-                setStatus("Не нашёл доску на экране. Открой партию так, чтобы доска была видна целиком (без других окон поверх), и жми «Старт» ещё раз")
+                val shot = bmp
+                if (shot != null) saveDebug(shot)
+                setStatus(
+                    "Не нашёл доску на экране (кадр ${bmp.width}x${bmp.height}). ${BoardFinder.lastInfo}. " +
+                        "Кадр сохранён в Галерею (альбом ChessBot) — пришли его разработчику."
+                )
                 running = false
                 return
             }

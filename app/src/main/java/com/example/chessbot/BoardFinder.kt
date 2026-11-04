@@ -8,7 +8,12 @@ import kotlin.math.max
 /** Ищет шахматную доску на скриншоте: сетка 8x8 из двух чередующихся цветов. */
 object BoardFinder {
     private const val STEP = 4
-    private const val TOL = 10
+    private var tolMask = 10   // допуск цвета при поиске столбцов доски
+    private var tolMatch = 24  // допуск цвета клетки при сверке с шахматным узором
+
+    /** Что нашёл последний поиск (для диагностики на панели). */
+    @Volatile
+    var lastInfo: String = ""
 
     private fun d(a: Int, b: Int): Int {
         val dr = abs(((a shr 16) and 255) - ((b shr 16) and 255))
@@ -48,7 +53,10 @@ object BoardFinder {
         intArrayOf(0xFFEAE9D2.toInt(), 0xFF779A58.toInt())
     )
 
-    fun find(bmp: Bitmap): Rect? {
+    /** relaxed = true: мягкие допуски для досок с градиентом/текстурой. */
+    fun find(bmp: Bitmap, relaxed: Boolean = false): Rect? {
+        tolMask = if (relaxed) 26 else 10
+        tolMatch = if (relaxed) 44 else 24
         val w = bmp.width / STEP
         val h = bmp.height / STEP
         val px = IntArray(w * h)
@@ -87,7 +95,9 @@ object BoardFinder {
             val sc = sharp(bmp, r, pr[0], pr[1])
             if (sc > bestScore) { bestScore = sc; best = r }
         }
-        return if (bestScore >= 0.6) best else null
+        val hex = cands.take(4).joinToString(" ") { String.format("#%06X", it[1] and 0xFFFFFF) }
+        lastInfo = "цвета экрана: $hex; лучшая оценка доски: ${"%.2f".format(bestScore)}" + (if (relaxed) " (мягкий режим)" else "")
+        return if (bestScore >= (if (relaxed) 0.5 else 0.6)) best else null
     }
 
     /**
@@ -98,7 +108,7 @@ object BoardFinder {
         val colC = IntArray(w)
         for (y in 0 until h) for (x in 0 until w) {
             val p = px[y * w + x]
-            if (d(p, a) <= TOL || d(p, b) <= TOL) colC[x]++
+            if (d(p, a) <= tolMask || d(p, b) <= tolMask) colC[x]++
         }
         val rx = longestRun(colC, 0, w - 1, 0.3) ?: return null
         val left = rx[0] * STEP
@@ -155,7 +165,7 @@ object BoardFinder {
     )
 
     private fun near(p: Int, ts: IntArray): Boolean {
-        for (t in ts) if (d(p, t) <= 24) return true
+        for (t in ts) if (d(p, t) <= tolMatch) return true
         return false
     }
 
