@@ -4,8 +4,6 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Rect
-import android.view.MotionEvent
 import android.view.View
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -60,39 +58,5 @@ class OverlayView(ctx: Context) : View(ctx) {
         c.drawCircle(a[2], a[3], radius, ring2)
         c.drawText("1", a[0], a[1] + 16f, text)
         c.drawText("2", a[2], a[3] + 16f, text)
-    }
-}
-
-/** Затемнённый экран: нужно тапнуть по двум углам доски (левый-верхний и правый-нижний). */
-class CalibView(ctx: Context, private val done: (Rect) -> Unit) : View(ctx) {
-    private val pts = ArrayList<FloatArray>()
-    private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 59, 48) }
-    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE; textSize = 44f; textAlign = Paint.Align.CENTER
-    }
-
-    init {
-        setBackgroundColor(Color.argb(110, 0, 0, 0))
-    }
-
-    override fun onDraw(c: Canvas) {
-        val msg = if (pts.isEmpty()) "Тапни ЛЕВЫЙ ВЕРХНИЙ угол доски" else "Теперь ПРАВЫЙ НИЖНИЙ угол доски"
-        c.drawText(msg, width / 2f, height * 0.15f, txt)
-        for (p in pts) c.drawCircle(p[0], p[1], 14f, dot)
-    }
-
-    override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (e.action == MotionEvent.ACTION_DOWN) {
-            pts.add(floatArrayOf(e.rawX, e.rawY))
-            invalidate()
-            if (pts.size == 2) {
-                val l = minOf(pts[0][0], pts[1][0]).toInt()
-                val t = minOf(pts[0][1], pts[1][1]).toInt()
-                val r = maxOf(pts[0][0], pts[1][0]).toInt()
-                val b = maxOf(pts[0][1], pts[1][1]).toInt()
-                done(Rect(l, t, r, b))
-            }
-        }
-        return true
     }
 }

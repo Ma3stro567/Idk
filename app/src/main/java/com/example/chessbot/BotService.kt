@@ -49,7 +49,6 @@ class BotService : Service() {
     private var panel: LinearLayout? = null
     private var statusView: TextView? = null
     private var autoBtn: Button? = null
-    private var calib: CalibView? = null
 
     @Volatile
     private var running = false
@@ -194,7 +193,6 @@ class BotService : Service() {
         row1.addView(btn("Старт: его ход") { startGame(true) })
         col.addView(row1)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(btn("Калибр.") { calibrate() })
         row.addView(btn("Стоп") { stopGame() })
         val ab = btn(if (Cfg.auto(this)) "Авто: вкл" else "Авто: выкл") {
             Cfg.setAuto(this, !Cfg.auto(this))
@@ -227,21 +225,6 @@ class BotService : Service() {
 
     private fun setStatus(s: String) {
         ui.post { statusView?.text = s }
-    }
-
-    private fun calibrate() {
-        if (calib != null) return
-        stopGame()
-        val cv = CalibView(this) { r ->
-            Cfg.saveRect(this, r)
-            ui.post {
-                calib?.let { wm.removeView(it) }
-                calib = null
-                setStatus("Доска откалибрована. Жми «Старт»")
-            }
-        }
-        calib = cv
-        wm.addView(cv, lp(sw, sh, true))
     }
 
     // ---------- игра ----------
@@ -378,13 +361,12 @@ class BotService : Service() {
 
             setStatus("Ищу доску на экране…")
             val found = BoardFinder.find(bmp)
-            val manual = Cfg.rect(this)?.let { BoardFinder.refineManual(bmp, it) }
-            val rect = found ?: manual
-            if (rect == null) {
-                setStatus("Не нашёл доску. Открой партию так, чтобы доска была видна целиком, или нажми «Калибр.»")
+            if (found == null) {
+                setStatus("Не нашёл доску на экране. Открой партию так, чтобы доска была видна целиком (без других окон поверх), и жми «Старт» ещё раз")
                 running = false
                 return
             }
+            val rect = found
             val reader = BoardReader()
             val tplFile = File(filesDir, "tpl.bin")
             val hadTemplates = reader.load(tplFile)
@@ -438,8 +420,7 @@ class BotService : Service() {
                 board.loadFromFen(fenOf(obs!!, whiteToMove))
             }
             setStatus(
-                (if (found != null) "Доска найдена" else "Доска из калибровки") +
-                    ", я за ${if (white) "белых" else "чёрных"}" +
+                "Доска найдена, я за ${if (white) "белых" else "чёрных"}" +
                     (if (startPos) ", новая партия" else ", партия с середины (права на рокировку угаданы по расстановке)")
             )
 
@@ -547,7 +528,7 @@ class BotService : Service() {
         running = false
         worker?.interrupt()
         try { engine?.destroy() } catch (_: Exception) {}
-        listOf<View?>(overlay, panel, calib).forEach { v ->
+        listOf<View?>(overlay, panel).forEach { v ->
             try { if (v != null) wm.removeView(v) } catch (_: Exception) {}
         }
         try { vdisplay?.release() } catch (_: Exception) {}

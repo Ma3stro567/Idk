@@ -75,18 +75,6 @@ object BoardFinder {
         return if (bestScore >= 0.75) best else null
     }
 
-    /** Уточняет рамку, заданную вручную (калибровкой): цвета клеток берём прямо с экрана. */
-    fun refineManual(bmp: Bitmap, r: Rect): Rect {
-        val cw = r.width() / 8f
-        val ch = r.height() / 8f
-        fun px(col: Int, row: Int): Int {
-            val x = (r.left + (col + 0.5f) * cw).toInt().coerceIn(0, bmp.width - 1)
-            val y = (r.top + (row + 0.1f) * ch).toInt().coerceIn(0, bmp.height - 1)
-            return bmp.getPixel(x, y)
-        }
-        return refine(bmp, r, px(0, 0), px(1, 0))
-    }
-
     /** Точность до пикселя: двигаем каждый край доски там, где углы клеток лучше всего ложатся в шахматный узор. */
     private fun refine(bmp: Bitmap, r0: Rect, a: Int, b: Int): Rect {
         var l = r0.left
