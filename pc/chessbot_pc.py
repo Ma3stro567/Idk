@@ -19,11 +19,13 @@ import chess.engine
 import numpy as np
 
 from vision import Finder, Reader
+import winutil
 
 APP_DIR = os.path.join(os.path.expanduser("~"), "ChessBotPC")
 CFG_PATH = os.path.join(APP_DIR, "config.json")
 TPL_PATH = os.path.join(APP_DIR, "templates.npz")
-DEFAULTS = dict(elo=2800, ms=1000, pmin=0, pmax=0, color="Авто", auto=True, last_board=None)
+DEFAULTS = dict(elo=2800, ms=1000, pmin=0, pmax=0, color="Авто", auto=True, last_board=None,
+                window="Весь экран", click_mode="Фоновые")
 
 
 def load_cfg():
@@ -131,6 +133,8 @@ class App:
         self.overlay = None
         self.sct = None
         self.mon = None
+        self.target = None   # hwnd выбранного окна (None = весь экран)
+        self.win_map = {}
         self.excluded = False
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
@@ -155,16 +159,37 @@ class App:
         for i, (txt, w) in enumerate(rows):
             ttk.Label(f, text=txt).grid(row=i, column=0, sticky="w", pady=2)
             w.grid(row=i, column=1, padx=6)
-        ttk.Checkbutton(f, text="Кликать мышью автоматически", variable=self.v_auto).grid(
-            row=5, column=0, columnspan=2, sticky="w", pady=4)
+        self.v_window = tk.StringVar(value=self.cfg["window"])
+        self.v_mode = tk.StringVar(value=self.cfg["click_mode"])
+        ttk.Label(f, text="Окно с доской").grid(row=5, column=0, sticky="w", pady=2)
+        wf = ttk.Frame(f)
+        wf.grid(row=5, column=1, sticky="w", padx=6)
+        self.cb_window = ttk.Combobox(wf, textvariable=self.v_window, width=34, state="readonly")
+        self.cb_window.grid(row=0, column=0)
+        ttk.Button(wf, text="⟳", width=3, command=self.refresh_windows).grid(row=0, column=1, padx=2)
+        ttk.Label(f, text="Клики в окне").grid(row=6, column=0, sticky="w", pady=2)
+        ttk.Combobox(f, textvariable=self.v_mode, width=34, state="readonly",
+                     values=["Фоновые", "Мышью"]).grid(row=6, column=1, sticky="w", padx=6)
+        ttk.Checkbutton(f, text="Кликать автоматически", variable=self.v_auto).grid(
+            row=7, column=0, columnspan=2, sticky="w", pady=4)
         b = ttk.Frame(f)
-        b.grid(row=6, column=0, columnspan=2, pady=4)
+        b.grid(row=8, column=0, columnspan=2, pady=4)
         ttk.Button(b, text="▶ Мой ход", command=lambda: self.start(False)).grid(row=0, column=0, padx=2)
         ttk.Button(b, text="▶ Его ход", command=lambda: self.start(True)).grid(row=0, column=1, padx=2)
         ttk.Button(b, text="⏸ Пауза", command=self.pause).grid(row=0, column=2, padx=2)
         self.status = tk.StringVar(value="Открой партию с видимой доской и жми «▶ Мой ход» (или «▶ Его ход»).")
         ttk.Label(f, textvariable=self.status, wraplength=360, justify="left").grid(
-            row=7, column=0, columnspan=2, sticky="w", pady=(6, 0))
+            row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.refresh_windows()
+
+    def refresh_windows(self):
+        wins = winutil.list_windows() if winutil.AVAILABLE else []
+        self.win_map = {t: h for h, t in wins}
+        vals = ["Весь экран"] + sorted(self.win_map)
+        cur = self.v_window.get()
+        if cur not in vals and cur != "Весь экран":
+            vals.insert(1, cur)  # сохранённое окно, даже если сейчас его нет в списке
+        self.cb_window.configure(values=vals)
 
     def _init_win(self):
         if sys.platform == "win32":
@@ -246,19 +271,57 @@ class App:
         self.ui(lambda: self.canvas.delete("all") if self.overlay is not None else None)
 
     # ---------- захват экрана
-    def grab(self):
+    def _open_capture(self):
+        """mss на Windows привязан к потоку, где создан: создаём заново в каждом запуске (иначе ошибка BitBlt)."""
         import mss
-        if self.sct is None:
-            self.sct = mss.mss()
-            self.mon = dict(self.sct.monitors[1])
+        self._close_capture()
+        self.sct = mss.mss()
+        self.mon = dict(self.sct.monitors[1])
+
+    def _close_capture(self):
+        try:
+            if self.sct is not None:
+                self.sct.close()
+        except Exception:
+            pass
+        self.sct = None
+
+    def grab(self):
         hide = (not self.excluded) and self.overlay is not None
         if hide:
             self.ui(lambda: self.overlay.withdraw())
             time.sleep(0.12)
-        shot = self.sct.grab(self.mon)
-        if hide:
-            self.ui(lambda: self.overlay.deiconify())
-        return np.array(shot)[:, :, :3][:, :, ::-1]
+        try:
+            last = None
+            for attempt in range(4):
+                try:
+                    if self.target:
+                        if winutil.is_iconic(self.target):
+                            raise RuntimeError("окно свёрнуто — разверни его (можно закрыть другими окнами)")
+                        return winutil.capture_window(self.target)
+                    shot = self.sct.grab(self.mon)
+                    return np.array(shot)[:, :, :3][:, :, ::-1]
+                except RuntimeError:
+                    raise
+                except Exception as e:  # BitBlt/GetDIBits после блокировки экрана, смены разрешения и т.п.
+                    last = e
+                    time.sleep(0.4)
+                    if not self.target:
+                        try:
+                            self._open_capture()
+                        except Exception as e2:
+                            last = e2
+            raise RuntimeError(f"не удалось сделать снимок экрана: {last}")
+        finally:
+            if hide:
+                self.ui(lambda: self.overlay.deiconify())
+
+    # ---------- координаты: x, y — в системе снимка (экран или окно)
+    def to_screen(self, x, y):
+        if self.target:
+            wl, wt = winutil.window_origin(self.target)
+            return wl + x, wt + y
+        return self.mon["left"] + x, self.mon["top"] + y
 
     # ---------- клики
     @staticmethod
@@ -267,7 +330,7 @@ class App:
         dy = max(-0.3, min(0.3, random.gauss(0, 0.12))) * cell
         return x + dx, y + dy
 
-    def _click(self, x, y):
+    def _mouse_click(self, x, y):
         import pyautogui
         pyautogui.PAUSE = 0
         pyautogui.moveTo(x, y, duration=random.uniform(0.25, 0.6), tween=pyautogui.easeOutQuad)
@@ -276,21 +339,36 @@ class App:
         time.sleep(random.uniform(0.04, 0.12))
         pyautogui.mouseUp()
 
+    def _click_point(self, x, y, cell):
+        """Один клик в точке снимка (x, y) с человеческим разбросом."""
+        x, y = self._human_point(x, y, cell)
+        ax, ay = self.to_screen(x, y)
+        if self.target and self.cfg["click_mode"] == "Фоновые":
+            winutil.post_click(self.target, ax, ay)  # настоящий курсор не двигается
+        else:
+            self._mouse_click(ax, ay)
+
     def click_move(self, move, rect, white):
+        import pyautogui
         cell = (rect[2] - rect[0]) / 8.0
-        mon = self.mon
         ax, ay = square_center(rect, white, move.from_square)
         bx, by = square_center(rect, white, move.to_square)
-        ax, ay = self._human_point(ax + mon["left"], ay + mon["top"], cell)
-        bx, by = self._human_point(bx + mon["left"], by + mon["top"], cell)
-        self._click(ax, ay)
+        use_mouse = not (self.target and self.cfg["click_mode"] == "Фоновые")
+        old_pos = None
+        if self.target and use_mouse:
+            old_pos = pyautogui.position()
+            winutil.bring_to_front(self.target)
+            time.sleep(0.25)
+        self._click_point(ax, ay, cell)
         time.sleep(random.uniform(0.28, 0.8))
         if not self.running:
             return  # поставили на паузу между кликами
-        self._click(bx, by)
+        self._click_point(bx, by, cell)
         if move.promotion:
             time.sleep(random.uniform(0.45, 0.9))
-            self._click(*self._human_point(bx, by, cell))  # ферзь — первый вариант на поле назначения
+            self._click_point(bx, by, cell)  # ферзь — первый вариант на поле назначения
+        if old_pos is not None:
+            pyautogui.moveTo(old_pos[0], old_pos[1], duration=0.2)  # вернуть курсор пользователю
 
     # ---------- управление
     def _read_cfg(self):
@@ -301,7 +379,8 @@ class App:
                 return d
         self.cfg.update(elo=num(self.v_elo, 2800, 0, 3190), ms=num(self.v_ms, 1000, 100, 60000),
                         pmin=num(self.v_pmin, 0, 0, 120), pmax=num(self.v_pmax, 0, 0, 120),
-                        color=self.v_color.get(), auto=bool(self.v_auto.get()))
+                        color=self.v_color.get(), auto=bool(self.v_auto.get()),
+                        window=self.v_window.get(), click_mode=self.v_mode.get())
         save_cfg(self.cfg)
 
     def start(self, opponent_first):
@@ -336,12 +415,14 @@ class App:
     # ---------- главный цикл
     def run_bot(self, opponent_first):
         try:
+            self._open_capture()
             self._run(opponent_first)
         except Exception as e:  # noqa
             self.set_status(f"Ошибка: {e}")
         finally:
             self.running = False
             self.clear_move()
+            self._close_capture()
 
     def _run(self, opponent_first):
         cfg = self.cfg
@@ -349,8 +430,16 @@ class App:
         if not sf:
             self.set_status("Не найден Stockfish. Положи stockfish.exe рядом с ChessBot.exe.")
             return
-        self.set_status("Ищу доску на экране…")
+        title = cfg.get("window", "Весь экран")
+        self.target = None
+        if title and title != "Весь экран":
+            self.target = winutil.find_window(title) if winutil.AVAILABLE else None
+            if not self.target:
+                self.set_status(f"Окно «{title}» не найдено. Открой его и нажми ⟳ в списке окон.")
+                return
+        self.set_status("Ищу доску " + ("в окне…" if self.target else "на экране…"))
         frame = self.grab()
+        first_shape = frame.shape
         finder = Finder()
         rect = finder.find(frame) or finder.find(frame, relaxed=True)
         if rect is None and cfg.get("last_board"):
@@ -420,6 +509,13 @@ class App:
         pending, pending_since, prev = None, 0.0, None
         while self.alive and self.running:
             frame = self.grab()
+            if frame.shape != first_shape:  # окно изменили в размере — ищем доску заново
+                new = finder.find(frame) or finder.find(frame, relaxed=True)
+                if new is not None:
+                    rect = new
+                    cell = (rect[2] - rect[0]) / 8.0
+                    cfg["last_board"] = list(rect)
+                first_shape = frame.shape
             obs = reader.read(frame, rect, white)
             if prev is None or mismatch(obs, prev) > 1:
                 prev = obs
@@ -478,8 +574,8 @@ class App:
                 pending, pending_since = move, time.time()
                 a = square_center(rect, white, move.from_square)
                 b = square_center(rect, white, move.to_square)
-                self.show_move((a[0] + self.mon["left"], a[1] + self.mon["top"]),
-                               (b[0] + self.mon["left"], b[1] + self.mon["top"]), cell)
+                if not (self.target and cfg["auto"]):  # в фоновом режиме стрелка на чужих окнах не нужна
+                    self.show_move(self.to_screen(*a), self.to_screen(*b), cell)
                 self.set_status(f"Ход: {move.uci()}   (1 — откуда, 2 — куда)")
                 if cfg["auto"]:
                     self.click_move(move, rect, white)
