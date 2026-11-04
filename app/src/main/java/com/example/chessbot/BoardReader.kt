@@ -184,7 +184,6 @@ class BoardReader {
         var s0 = 0
         for (i in 0 until n) if (use[i]) s0 += dist(p.px[i], p.bg)
         var bestD = s0.toFloat() / cnt
-        if (bestD < 22f) return ' ' // клетка почти целиком цвета фона — пусто
         var best = ' '
         for ((c, t) in templates) {
             var s = 0

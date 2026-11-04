@@ -309,6 +309,19 @@ class BotService : Service() {
         return obs.count { it == 'K' } == 1 && obs.count { it == 'k' } == 1
     }
 
+    /** Легальный ход, после которого позиция на доске совпадает с экраном (допускаем 1 ошибку чтения). */
+    private fun findMove(board: Board, obs: CharArray, diffCur: Int): Move? {
+        var bestM: Move? = null
+        var bestD = 99
+        for (m in board.legalMoves()) {
+            board.doMove(m)
+            val d = mismatch(obs, placement(board))
+            board.undoMove()
+            if (d < bestD) { bestD = d; bestM = m }
+        }
+        return if (bestM != null && bestD <= 1 && bestD < diffCur) bestM else null
+    }
+
     private fun gridText(obs: CharArray, white: Boolean): String {
         val sb = StringBuilder()
         for (row in 0..7) {
@@ -460,22 +473,32 @@ class BotService : Service() {
                     continue
                 }
 
-                val diffCur = mismatch(obs, placement(board))
+                val cur0 = placement(board)
+                val diffCur = mismatch(obs, cur0)
                 if (diffCur >= 2) {
-                    var bestM: Move? = null
-                    var bestD = 99
-                    for (m in board.legalMoves()) {
-                        board.doMove(m)
-                        val d = mismatch(obs, placement(board))
-                        board.undoMove()
-                        if (d < bestD) { bestD = d; bestM = m }
+                    var bestM = findMove(board, obs, diffCur)
+                    if (bestM == null) {
+                        // возможно, очередь хода была угадана неверно: пробуем за другую сторону
+                        val orig = board.sideToMove
+                        board.sideToMove = orig.flip()
+                        bestM = findMove(board, obs, diffCur)
+                        if (bestM == null) board.sideToMove = orig
                     }
-                    if (bestM != null && bestD <= 1 && bestD < diffCur) {
+                    if (bestM != null) {
                         board.doMove(bestM)
                         pending = null
                         overlay?.clear()
                         if (board.isMated) { setStatus("Мат. Партия окончена"); break }
                         if (board.isDraw) { setStatus("Ничья. Партия окончена"); break }
+                    } else if (midGameOk(obs)) {
+                        // ход не сходится ни с какой стороны (пропустили ход, взяли ход назад и т.п.):
+                        // заново собираем позицию с экрана; ходит тот, кто НЕ делал последний ход
+                        val moved = obs.indices.firstOrNull { obs[it] != ' ' && obs[it] != '?' && obs[it] != cur0[it] }
+                        val whiteToMove = if (moved != null) !obs[moved].isUpperCase() else (mySide == Side.WHITE)
+                        board.loadFromFen(fenOf(obs, whiteToMove))
+                        pending = null
+                        overlay?.clear()
+                        setStatus("Позиция пересинхронизирована с экрана")
                     } else {
                         setStatus("Не понял, что изменилось на доске (отличий: $diffCur). Жду…")
                         nap(300)
