@@ -342,7 +342,7 @@ class BotService : Service() {
             val white = when (Cfg.colorMode(this)) {
                 1 -> true
                 2 -> false
-                else -> BoardFinder.whiteAtBottom(reader, bmp, rect)
+                else -> BoardFinder.whiteAtBottom(bmp, rect)
             }
             val mySide = if (white) Side.WHITE else Side.BLACK
             val cell = rect.width() / 8f

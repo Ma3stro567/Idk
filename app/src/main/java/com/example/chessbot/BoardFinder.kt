@@ -127,16 +127,24 @@ object BoardFinder {
         return max(okA, okB) / 64.0
     }
 
-    /** Белые ли внизу: у белых фигур пиксели ярче, чем у чёрных. */
-    fun whiteAtBottom(reader: BoardReader, bmp: Bitmap, r: Rect): Boolean {
-        fun avg(rows: IntArray): Float {
-            var s = 0f
-            var n = 0f
-            for (row in rows) for (col in 0..7) {
-                val v = reader.pieceLuma(bmp, r, row, col)
-                s += v[0]; n += v[1]
+    /**
+     * Белые ли внизу: сравниваем среднюю яркость центра клеток в двух нижних и двух верхних рядах.
+     * Фон (шахматные клетки) в этих рядах одинаковый, различаются только фигуры: белые ярче чёрных.
+     */
+    fun whiteAtBottom(bmp: Bitmap, r: Rect): Boolean {
+        val cw = r.width() / 8f
+        val ch = r.height() / 8f
+        fun avg(rows: IntArray): Double {
+            var sum = 0.0
+            var n = 0
+            for (row in rows) for (col in 0..7) for (iy in 0 until 6) for (ix in 0 until 6) {
+                val x = (r.left + (col + 0.25f + 0.5f * (ix + 0.5f) / 6f) * cw).toInt().coerceIn(0, bmp.width - 1)
+                val y = (r.top + (row + 0.2f + 0.6f * (iy + 0.5f) / 6f) * ch).toInt().coerceIn(0, bmp.height - 1)
+                val c = bmp.getPixel(x, y)
+                sum += 0.299 * ((c shr 16) and 255) + 0.587 * ((c shr 8) and 255) + 0.114 * (c and 255)
+                n++
             }
-            return if (n > 0) s / n else 0f
+            return sum / n
         }
         return avg(intArrayOf(6, 7)) >= avg(intArrayOf(0, 1))
     }
