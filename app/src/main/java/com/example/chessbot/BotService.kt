@@ -360,7 +360,18 @@ class BotService : Service() {
             }
 
             setStatus("Ищу доску на экране…")
-            val found = BoardFinder.find(bmp)
+            var found = BoardFinder.find(bmp)
+            var tries = 0
+            while (found == null && tries < 3 && running) {
+                tries++
+                nap(300)
+                val nb = grab(true)
+                if (nb != null) {
+                    bmp = nb
+                    found = BoardFinder.find(nb)
+                }
+            }
+            val frame: Bitmap = bmp ?: return
             if (found == null) {
                 setStatus("Не нашёл доску на экране. Открой партию так, чтобы доска была видна целиком (без других окон поверх), и жми «Старт» ещё раз")
                 running = false
@@ -369,7 +380,7 @@ class BotService : Service() {
             val rect = found
             val reader = BoardReader()
             val tplFile = File(filesDir, "tpl.bin")
-            val hadTemplates = reader.load(tplFile)
+            val hadTemplates = reader.load(tplFile) || reader.loadAsset(this)
             val expectedStart = placement(Board())
             val modeWhite: Boolean? = when (Cfg.colorMode(this)) { 1 -> true; 2 -> false; else -> null }
 
@@ -377,12 +388,12 @@ class BotService : Service() {
             var obs: CharArray? = null
             var startPos = false
             if (hadTemplates) {
-                val tmp = reader.read(bmp, rect, true)
-                white = modeWhite ?: reader.whiteAtBottom(tmp) ?: BoardFinder.whiteAtBottom(bmp, rect)
-                obs = reader.read(bmp, rect, white)
+                val tmp = reader.read(frame, rect, true)
+                white = modeWhite ?: reader.whiteAtBottom(tmp) ?: BoardFinder.whiteAtBottom(frame, rect)
+                obs = reader.read(frame, rect, white)
                 startPos = mismatch(obs, expectedStart) <= 1
             } else {
-                white = modeWhite ?: BoardFinder.whiteAtBottom(bmp, rect)
+                white = modeWhite ?: BoardFinder.whiteAtBottom(frame, rect)
             }
 
             val board = Board()
@@ -391,8 +402,8 @@ class BotService : Service() {
                 var learned = false
                 var bad = 0
                 for (set in 0..1) {
-                    reader.learn(bmp, rect, white, set)
-                    obs = reader.read(bmp, rect, white)
+                    reader.learn(frame, rect, white, set)
+                    obs = reader.read(frame, rect, white)
                     bad = mismatch(obs, expectedStart)
                     if (bad <= 4) { learned = true; break }
                 }
@@ -401,7 +412,7 @@ class BotService : Service() {
                     setStatus(
                         "Не узнаю фигуры. Бот должен ОДИН РАЗ увидеть начальную позицию (новая партия, " +
                             "максимум пара ходов), чтобы запомнить вид фигур. Потом можно стартовать с любого места. " +
-                            "(ошибок: $bad, кадр ${bmp.width}x${bmp.height}, доска $rect, " +
+                            "(ошибок: $bad, кадр ${frame.width}x${frame.height}, доска $rect, " +
                             "я за ${if (white) "белых" else "чёрных"}). Бот видит:\n${gridText(obs!!, white)}"
                     )
                     running = false

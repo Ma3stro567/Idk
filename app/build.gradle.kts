@@ -11,8 +11,9 @@ android {
         applicationId = "com.example.chessbot"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // растёт с каждой сборкой в CI
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1) + 100
+        versionName = "1.$versionCode"
         ndk { abiFilters += "arm64-v8a" }
     }
 

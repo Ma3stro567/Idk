@@ -18,11 +18,11 @@ object BoardFinder {
     }
 
     /** Самая длинная серия подряд идущих индексов, где cnt >= порога (допускаем разрыв в 1). */
-    private fun longestRun(cnt: IntArray, from: Int, to: Int): IntArray? {
+    private fun longestRun(cnt: IntArray, from: Int, to: Int, frac: Double = 0.5): IntArray? {
         var mx = 0
         for (i in from..to) if (cnt[i] > mx) mx = cnt[i]
         if (mx < 20) return null
-        val thr = mx * 0.5
+        val thr = mx * frac
         var bestS = -1
         var bestE = -1
         var s = -1
@@ -41,6 +41,13 @@ object BoardFinder {
         return if (bestS < 0) null else intArrayOf(bestS, bestE)
     }
 
+    // известные цвета досок (светлая, тёмная): chess.com зелёная, lichess коричневая и зелёная
+    private val PRESETS = arrayOf(
+        intArrayOf(0xFFEEEED2.toInt(), 0xFF769656.toInt()),
+        intArrayOf(0xFFF0D9B5.toInt(), 0xFFB58863.toInt()),
+        intArrayOf(0xFFEAE9D2.toInt(), 0xFF779A58.toInt())
+    )
+
     fun find(bmp: Bitmap): Rect? {
         val w = bmp.width / STEP
         val h = bmp.height / STEP
@@ -55,24 +62,57 @@ object BoardFinder {
             e[0]++
         }
         val sorted = hist.values.filter { it[0] > w * h * 0.004 }.sortedByDescending { it[0] }
-        val cands = ArrayList<Int>()
+        val cands = ArrayList<IntArray>() // [счёт, цвет]
         for (e in sorted) {
             if (cands.size >= 14) break
-            if (cands.none { d(it, e[1]) < 10 }) cands.add(e[1])
+            if (cands.none { d(it[1], e[1]) < 10 }) cands.add(e)
+        }
+
+        val pairs = ArrayList<IntArray>()
+        for (pr in PRESETS) pairs.add(pr)
+        for (i in cands.indices) for (j in i + 1 until cands.size) {
+            val a = cands[i]
+            val b = cands[j]
+            if (d(a[1], b[1]) < 15) continue
+            // светлых и тёмных клеток примерно поровну
+            if (maxOf(a[0], b[0]) > 2.5 * minOf(a[0], b[0])) continue
+            pairs.add(intArrayOf(a[1], b[1]))
         }
 
         var best: Rect? = null
         var bestScore = 0.0
-        for (i in cands.indices) for (j in i + 1 until cands.size) {
-            val a = cands[i]
-            val b = cands[j]
-            if (d(a, b) < 15) continue
-            val r0 = candidate(px, w, h, a, b) ?: continue
-            val r = refine(bmp, r0, a, b)
-            val sc = sharp(bmp, r, a, b)
+        for (pr in pairs) {
+            val r0 = candidate(bmp, px, w, h, pr[0], pr[1]) ?: continue
+            val r = refine(bmp, r0, pr[0], pr[1])
+            val sc = sharp(bmp, r, pr[0], pr[1])
             if (sc > bestScore) { bestScore = sc; best = r }
         }
-        return if (bestScore >= 0.75) best else null
+        return if (bestScore >= 0.6) best else null
+    }
+
+    /**
+     * Доска квадратная. Ширину берём по столбцам, где много клеток двух цветов доски
+     * (её не портят панели поверх доски), а вертикальное положение ищем по шахматному узору.
+     */
+    private fun candidate(bmp: Bitmap, px: IntArray, w: Int, h: Int, a: Int, b: Int): Rect? {
+        val colC = IntArray(w)
+        for (y in 0 until h) for (x in 0 until w) {
+            val p = px[y * w + x]
+            if (d(p, a) <= TOL || d(p, b) <= TOL) colC[x]++
+        }
+        val rx = longestRun(colC, 0, w - 1, 0.3) ?: return null
+        val left = rx[0] * STEP
+        val size = (rx[1] + 1 - rx[0]) * STEP
+        if (size < 160 || size > minOf(bmp.width, bmp.height) + 8) return null
+        var bestSc = -1.0
+        var bestT = 0
+        var t = 0
+        while (t <= bmp.height - size) {
+            val sc = sharp(bmp, Rect(left, t, left + size, t + size), a, b)
+            if (sc > bestSc) { bestSc = sc; bestT = t }
+            t += 4
+        }
+        return Rect(left, bestT, left + size, bestT + size)
     }
 
     /** Точность до пикселя: двигаем каждый край доски там, где углы клеток лучше всего ложатся в шахматный узор. */

@@ -5,6 +5,8 @@ import android.graphics.Rect
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
+import java.io.InputStream
+import android.content.Context
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -88,26 +90,37 @@ class BoardReader {
     }
 
     fun load(f: File): Boolean {
-        try {
-            if (!f.exists()) return false
-            DataInputStream(f.inputStream().buffered()).use { i ->
-                val n = i.readInt()
-                val m = HashMap<Char, Template>()
-                repeat(n) {
-                    val c = i.readChar()
-                    val px = IntArray(N * N) { i.readInt() }
-                    val bg = BooleanArray(N * N) { i.readBoolean() }
-                    m[c] = Template(px, bg)
-                }
-                if (m.size == 12) {
-                    templates.clear()
-                    templates.putAll(m)
-                    return true
-                }
-            }
+        if (!f.exists()) return false
+        return try {
+            f.inputStream().use { readFrom(it) }
         } catch (_: Exception) {
+            false
         }
-        return false
+    }
+
+    /** Шаблоны фигур, вшитые в приложение (набор chess.com, сделан с реального скриншота). */
+    fun loadAsset(ctx: Context): Boolean {
+        return try {
+            ctx.assets.open("templates_chesscom.bin").use { readFrom(it) }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun readFrom(ins: InputStream): Boolean {
+        val i = DataInputStream(ins.buffered())
+        val n = i.readInt()
+        val m = HashMap<Char, Template>()
+        repeat(n) {
+            val c = i.readChar()
+            val px = IntArray(N * N) { i.readInt() }
+            val bg = BooleanArray(N * N) { i.readBoolean() }
+            m[c] = Template(px, bg)
+        }
+        if (m.size != 12) return false
+        templates.clear()
+        templates.putAll(m)
+        return true
     }
 
     /** Белые внизу? Сравниваем среднюю высоту белых и чёрных фигур на экране (при отображении «белые снизу»). */
@@ -165,18 +178,22 @@ class BoardReader {
     private fun classify(bmp: Bitmap, rect: Rect, row: Int, col: Int): Char {
         val p = patch(bmp, rect, row, col)
         val n = p.px.size
+        // углы клетки с подписями (цифры/буквы) не сравниваем
+        val use = BooleanArray(n) { k -> val x = k % N; val y = k / N; !((x >= 17 && y >= 17) || (x <= 2 && y <= 2)) }
+        val cnt = use.count { it }
         var s0 = 0
-        for (i in 0 until n) s0 += dist(p.px[i], p.bg)
-        var bestD = s0.toFloat() / n
+        for (i in 0 until n) if (use[i]) s0 += dist(p.px[i], p.bg)
+        var bestD = s0.toFloat() / cnt
         if (bestD < 22f) return ' ' // клетка почти целиком цвета фона — пусто
         var best = ' '
         for ((c, t) in templates) {
             var s = 0
             for (i in 0 until n) {
+                if (!use[i]) continue
                 val ref = if (t.isBg[i]) p.bg else t.px[i]
                 s += dist(p.px[i], ref)
             }
-            val d = s.toFloat() / n
+            val d = s.toFloat() / cnt
             if (d < bestD) {
                 bestD = d
                 best = c
