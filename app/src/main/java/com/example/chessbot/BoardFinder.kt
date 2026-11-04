@@ -141,10 +141,33 @@ object BoardFinder {
         return Rect(l, t, l + size, t + size)
     }
 
-    /** Как verify, но точки у самых углов клеток (3% от края): чувствительно к сдвигу границ. */
+    /** Цвет клетки с полупрозрачной подсветкой хода (chess.com: жёлтая 50%, lichess: зелёная 41%). */
+    private fun mix(base: Int, over: Int, alpha: Float): Int {
+        fun ch(sh: Int) = (((base shr sh) and 255) * (1 - alpha) + ((over shr sh) and 255) * alpha).toInt()
+        return (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+    }
+
+    /** Какие цвета допустимы для клетки данного «шахматного» цвета: обычный и с подсветкой хода. */
+    private fun tints(base: Int) = intArrayOf(
+        base,
+        mix(base, 0xFFFFFF33.toInt(), 0.5f),
+        mix(base, 0xFF9BC700.toInt(), 0.41f)
+    )
+
+    private fun near(p: Int, ts: IntArray): Boolean {
+        for (t in ts) if (d(p, t) <= 24) return true
+        return false
+    }
+
+    /**
+     * Сетка 8x8: углы клеток (3% от края) должны чередоваться светлый/тёмный по шахматной расстановке.
+     * Жёлтая (подсвеченная) клетка засчитывается как свой цвет по чётности, а не как ошибка.
+     */
     private fun sharp(bmp: Bitmap, r: Rect, a: Int, b: Int): Double {
         val cw = r.width() / 8f
         val ch = r.height() / 8f
+        val ta = tints(a)
+        val tb = tints(b)
         var okA = 0
         var okB = 0
         val offs = floatArrayOf(0.03f, 0.97f)
@@ -154,43 +177,13 @@ object BoardFinder {
                 val x = (r.left + (col + ox) * cw).toInt().coerceIn(0, bmp.width - 1)
                 val y = (r.top + (row + oy) * ch).toInt().coerceIn(0, bmp.height - 1)
                 val p = bmp.getPixel(x, y)
-                val nearA = d(p, a) <= 24
-                val nearB = d(p, b) <= 24
+                val nearA = near(p, ta)
+                val nearB = near(p, tb)
                 if ((aFirst && nearA) || (!aFirst && nearB)) okA++
                 if ((aFirst && nearB) || (!aFirst && nearA)) okB++
             }
         }
         return max(okA, okB) / 256.0
-    }
-
-    private fun candidate(px: IntArray, w: Int, h: Int, a: Int, b: Int): Rect? {
-        val rowC = IntArray(h)
-        val colC = IntArray(w)
-        for (y in 0 until h) for (x in 0 until w) {
-            val p = px[y * w + x]
-            if (d(p, a) <= TOL || d(p, b) <= TOL) { rowC[y]++; colC[x]++ }
-        }
-        var ry = longestRun(rowC, 0, h - 1) ?: return null
-        val colR = IntArray(w)
-        for (y in ry[0]..ry[1]) for (x in 0 until w) {
-            val p = px[y * w + x]
-            if (d(p, a) <= TOL || d(p, b) <= TOL) colR[x]++
-        }
-        val rx = longestRun(colR, 0, w - 1) ?: return null
-        val rowR = IntArray(h)
-        for (y in 0 until h) for (x in rx[0]..rx[1]) {
-            val p = px[y * w + x]
-            if (d(p, a) <= TOL || d(p, b) <= TOL) rowR[y]++
-        }
-        ry = longestRun(rowR, 0, h - 1) ?: return null
-        val left = rx[0] * STEP
-        val top = ry[0] * STEP
-        val bw = (rx[1] + 1 - rx[0]) * STEP
-        val bh = (ry[1] + 1 - ry[0]) * STEP
-        if (bw < 160 || bh < 160) return null
-        if (abs(bw - bh) > 0.08 * max(bw, bh)) return null
-        val size = (bw + bh) / 2
-        return Rect(left, top, left + size, top + size)
     }
 
     /**
