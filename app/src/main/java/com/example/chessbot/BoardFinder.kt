@@ -104,6 +104,34 @@ object BoardFinder {
      * Доска квадратная. Ширину берём по столбцам, где много клеток двух цветов доски
      * (её не портят панели поверх доски), а вертикальное положение ищем по шахматному узору.
      */
+    /**
+     * Запасной вариант: доска «примерно здесь» (там, где нашли в прошлый раз, или типичное место).
+     * Подгоняем края по шахматному узору и принимаем, если узор действительно сходится.
+     */
+    fun fallback(bmp: Bitmap, start: Rect): Rect? {
+        tolMatch = 24
+        val cw = start.width() / 8f
+        val ch = start.height() / 8f
+        fun px(col: Int): Int {
+            val x = (start.left + (col + 0.5f) * cw).toInt().coerceIn(0, bmp.width - 1)
+            val y = (start.top + 0.1f * ch).toInt().coerceIn(0, bmp.height - 1)
+            return bmp.getPixel(x, y)
+        }
+        val pairs = ArrayList<IntArray>()
+        for (pr in PRESETS) pairs.add(pr)
+        pairs.add(intArrayOf(px(0), px(1))) // цвета прямо с экрана в этом месте
+        var best: Rect? = null
+        var bestScore = 0.0
+        for (pr in pairs) {
+            if (d(pr[0], pr[1]) < 15) continue
+            val r = refine(bmp, start, pr[0], pr[1])
+            val sc = sharp(bmp, r, pr[0], pr[1])
+            if (sc > bestScore) { bestScore = sc; best = r }
+        }
+        lastInfo += "; запасной вариант (оценка ${"%.2f".format(bestScore)})"
+        return if (bestScore >= 0.45) best else null
+    }
+
     private fun candidate(bmp: Bitmap, px: IntArray, w: Int, h: Int, a: Int, b: Int): Rect? {
         val colC = IntArray(w)
         for (y in 0 until h) for (x in 0 until w) {

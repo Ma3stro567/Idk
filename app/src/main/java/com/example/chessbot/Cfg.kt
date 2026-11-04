@@ -1,6 +1,7 @@
 package com.example.chessbot
 
 import android.content.Context
+import android.graphics.Rect
 
 object Cfg {
     private fun p(c: Context) = c.getSharedPreferences("cfg", Context.MODE_PRIVATE)
@@ -17,4 +18,15 @@ object Cfg {
     }
 
     fun setAuto(c: Context, v: Boolean) = p(c).edit().putBoolean("auto", v).apply()
+
+    /** Где доска была найдена в последний раз (запасной вариант, если автопоиск не сработает). */
+    fun lastBoard(c: Context): Rect? {
+        val s = p(c)
+        if (!s.contains("bl")) return null
+        return Rect(s.getInt("bl", 0), s.getInt("bt", 0), s.getInt("br", 0), s.getInt("bb", 0))
+    }
+
+    fun saveBoard(c: Context, r: Rect) {
+        p(c).edit().putInt("bl", r.left).putInt("bt", r.top).putInt("br", r.right).putInt("bb", r.bottom).apply()
+    }
 }

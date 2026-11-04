@@ -413,6 +413,16 @@ class BotService : Service() {
             }
             val frame: Bitmap = bmp ?: return
             if (found == null) {
+                // запасной вариант: там, где доска была в прошлый раз, и типичное место (левый край, 30% высоты сверху)
+                val topDef = (0.30f * frame.height).toInt()
+                val starts = listOfNotNull(Cfg.lastBoard(this), Rect(0, topDef, frame.width, topDef + frame.width))
+                for (st in starts) {
+                    found = BoardFinder.fallback(frame, st)
+                    if (found != null) break
+                }
+            }
+            found?.let { Cfg.saveBoard(this, it) }
+            if (found == null) {
                 val shot = bmp
                 if (shot != null) saveDebug(shot)
                 setStatus(
