@@ -20,6 +20,9 @@ import numpy as np
 
 from vision import Finder, Reader
 import winutil
+import cdp as cdpmod
+
+CDP_OPTION = "Chrome (режим бота)"
 
 APP_DIR = os.path.join(os.path.expanduser("~"), "ChessBotPC")
 CFG_PATH = os.path.join(APP_DIR, "config.json")
@@ -134,6 +137,7 @@ class App:
         self.sct = None
         self.mon = None
         self.target = None   # hwnd выбранного окна (None = весь экран)
+        self.cdp = None      # подключение к вкладке Chrome через DevTools
         self.win_map = {}
         self.excluded = False
         self._build_ui()
@@ -167,6 +171,8 @@ class App:
         self.cb_window = ttk.Combobox(wf, textvariable=self.v_window, width=34, state="readonly")
         self.cb_window.grid(row=0, column=0)
         ttk.Button(wf, text="⟳", width=3, command=self.refresh_windows).grid(row=0, column=1, padx=2)
+        ttk.Button(f, text="Запустить Chrome для бота", command=self.launch_chrome).grid(
+            row=10, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Label(f, text="Клики в окне").grid(row=6, column=0, sticky="w", pady=2)
         ttk.Combobox(f, textvariable=self.v_mode, width=34, state="readonly",
                      values=["Фоновые", "Мышью"]).grid(row=6, column=1, sticky="w", padx=6)
@@ -185,11 +191,20 @@ class App:
     def refresh_windows(self):
         wins = winutil.list_windows() if winutil.AVAILABLE else []
         self.win_map = {t: h for h, t in wins}
-        vals = ["Весь экран"] + sorted(self.win_map)
+        vals = ["Весь экран", CDP_OPTION] + sorted(self.win_map)
         cur = self.v_window.get()
-        if cur not in vals and cur != "Весь экран":
+        if cur not in vals:
             vals.insert(1, cur)  # сохранённое окно, даже если сейчас его нет в списке
         self.cb_window.configure(values=vals)
+
+    def launch_chrome(self):
+        try:
+            cdpmod.launch_browser(os.path.join(APP_DIR, "chrome-profile"))
+            self.v_window.set(CDP_OPTION)
+            self.set_status("Chrome запущен в режиме бота (отдельный профиль: в нём один раз войди в аккаунт). "
+                            "Открой партию, выбери «Chrome (режим бота)» и жми «▶ Мой ход».")
+        except Exception as e:
+            self.set_status(f"Не удалось запустить Chrome: {e}")
 
     def _init_win(self):
         if sys.platform == "win32":
@@ -295,6 +310,13 @@ class App:
             last = None
             for attempt in range(4):
                 try:
+                    if self.cdp:
+                        try:
+                            return self.cdp.screenshot()
+                        except Exception:
+                            self.cdp.close()      # вкладку могли перезагрузить: переподключаемся
+                            self.cdp.connect()
+                            return self.cdp.screenshot()
                     if self.target:
                         if winutil.is_iconic(self.target):
                             raise RuntimeError("окно свёрнуто — разверни его (можно закрыть другими окнами)")
@@ -306,7 +328,7 @@ class App:
                 except Exception as e:  # BitBlt/GetDIBits после блокировки экрана, смены разрешения и т.п.
                     last = e
                     time.sleep(0.4)
-                    if not self.target:
+                    if not self.target and not self.cdp:
                         try:
                             self._open_capture()
                         except Exception as e2:
@@ -342,6 +364,9 @@ class App:
     def _click_point(self, x, y, cell):
         """Один клик в точке снимка (x, y) с человеческим разбросом."""
         x, y = self._human_point(x, y, cell)
+        if self.cdp:
+            self.cdp.click(x, y)  # клик прямо во вкладку, настоящая мышь не используется
+            return
         ax, ay = self.to_screen(x, y)
         if self.target and self.cfg["click_mode"] == "Фоновые":
             winutil.post_click(self.target, ax, ay)  # настоящий курсор не двигается
@@ -355,7 +380,7 @@ class App:
         bx, by = square_center(rect, white, move.to_square)
         use_mouse = not (self.target and self.cfg["click_mode"] == "Фоновые")
         old_pos = None
-        if self.target and use_mouse:
+        if self.target and use_mouse and not self.cdp:
             old_pos = pyautogui.position()
             winutil.bring_to_front(self.target)
             time.sleep(0.25)
@@ -423,6 +448,8 @@ class App:
             self.running = False
             self.clear_move()
             self._close_capture()
+            if self.cdp:
+                self.cdp.close()
 
     def _run(self, opponent_first):
         cfg = self.cfg
@@ -432,12 +459,22 @@ class App:
             return
         title = cfg.get("window", "Весь экран")
         self.target = None
-        if title and title != "Весь экран":
+        if self.cdp:
+            self.cdp.close()
+        self.cdp = None
+        if title == CDP_OPTION:
+            if not cdpmod.available():
+                self.set_status("Chrome в режиме бота не запущен. Нажми «Запустить Chrome для бота», открой партию "
+                                "и снова жми «▶ Мой ход».")
+                return
+            self.cdp = cdpmod.CDP()
+            self.cdp.connect()
+        elif title and title != "Весь экран":
             self.target = winutil.find_window(title) if winutil.AVAILABLE else None
             if not self.target:
                 self.set_status(f"Окно «{title}» не найдено. Открой его и нажми ⟳ в списке окон.")
                 return
-        self.set_status("Ищу доску " + ("в окне…" if self.target else "на экране…"))
+        self.set_status("Ищу доску " + ("в окне…" if (self.target or self.cdp) else "на экране…"))
         frame = self.grab()
         first_shape = frame.shape
         finder = Finder()
@@ -574,7 +611,7 @@ class App:
                 pending, pending_since = move, time.time()
                 a = square_center(rect, white, move.from_square)
                 b = square_center(rect, white, move.to_square)
-                if not (self.target and cfg["auto"]):  # в фоновом режиме стрелка на чужих окнах не нужна
+                if not self.cdp and not (self.target and cfg["auto"]):  # в фоновых режимах стрелка не нужна
                     self.show_move(self.to_screen(*a), self.to_screen(*b), cell)
                 self.set_status(f"Ход: {move.uci()}   (1 — откуда, 2 — куда)")
                 if cfg["auto"]:

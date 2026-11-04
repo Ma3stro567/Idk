@@ -3,3 +3,4 @@ pillow
 mss
 pyautogui
 chess==1.10.0
+websocket-client

@@ -37,7 +37,7 @@ jobs:
 
       - name: Build single exe (Stockfish inside)
         working-directory: pc
-        run: pyinstaller --onefile --noconsole --name ChessBot --add-data "templates_chesscom.npz;." --add-binary "stockfish.exe;." chessbot_pc.py
+        run: pyinstaller --onefile --noconsole --name ChessBot --hidden-import websocket --add-data "templates_chesscom.npz;." --add-binary "stockfish.exe;." chessbot_pc.py
 
       - uses: actions/upload-artifact@v4
         with:
