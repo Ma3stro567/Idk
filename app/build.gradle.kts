@@ -17,6 +17,20 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
+    // Постоянный ключ подписи (лежит в репозитории по решению владельца): все сборки подписаны одним ключом,
+    // поэтому приложение обновляется поверх старой версии без удаления.
+    signingConfigs {
+        create("chessbot") {
+            storeFile = file("keystore/chessbot.jks")
+            storePassword = "chessbot123"
+            keyAlias = "chessbot"
+            keyPassword = "chessbot123"
+        }
+    }
+    buildTypes {
+        getByName("debug") { signingConfig = signingConfigs.getByName("chessbot") }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
