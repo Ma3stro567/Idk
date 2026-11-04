@@ -249,10 +249,6 @@ class BotService : Service() {
 
     private fun startGame() {
         if (running) return
-        if (Cfg.rect(this) == null) {
-            setStatus("Сначала «Калибр.»")
-            return
-        }
         running = true
         worker = Thread { runBot() }.also { it.isDaemon = true; it.start() }
     }
@@ -308,13 +304,20 @@ class BotService : Service() {
         }
     }
 
+    /** Выполняет блокирующий вызов с таймаутом, чтобы бот не «висел» бесконечно. */
+    private fun <T> timed(sec: Long, f: () -> T): T {
+        val ex = java.util.concurrent.Executors.newSingleThreadExecutor()
+        try {
+            return ex.submit(java.util.concurrent.Callable { f() }).get(sec, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (e: java.util.concurrent.TimeoutException) {
+            throw IllegalStateException("Stockfish не ответил за $sec с")
+        } finally {
+            ex.shutdownNow()
+        }
+    }
+
     private fun runBot() {
         try {
-            val white = Cfg.white(this)
-            val mySide = if (white) Side.WHITE else Side.BLACK
-            val rect = Cfg.rect(this)!!
-            val cell = rect.width() / 8f
-
             var bmp: Bitmap? = null
             for (i in 0 until 20) {
                 bmp = grab()
@@ -327,7 +330,25 @@ class BotService : Service() {
                 return
             }
 
+            setStatus("Ищу доску на экране…")
+            val found = BoardFinder.find(bmp)
+            val rect = found ?: Cfg.rect(this)
+            if (rect == null) {
+                setStatus("Не нашёл доску. Открой партию так, чтобы доска была видна целиком, или нажми «Калибр.»")
+                running = false
+                return
+            }
             val reader = BoardReader()
+            val white = when (Cfg.colorMode(this)) {
+                1 -> true
+                2 -> false
+                else -> BoardFinder.whiteAtBottom(reader, bmp, rect)
+            }
+            val mySide = if (white) Side.WHITE else Side.BLACK
+            val cell = rect.width() / 8f
+            setStatus((if (found != null) "Доска найдена" else "Доска из калибровки") +
+                ", я за ${if (white) "белых" else "чёрных"}")
+
             reader.learn(bmp, rect, white)
             val board = Board()
             val first = reader.read(bmp, rect, white)
@@ -354,7 +375,7 @@ class BotService : Service() {
 
             if (engine == null) {
                 setStatus("Запускаю Stockfish…")
-                engine = Engine(this)
+                engine = timed(20) { Engine(this) }
             }
             val eng = engine!!
             eng.configure(Cfg.elo(this))
@@ -370,8 +391,9 @@ class BotService : Service() {
                 if (b == null) { nap(300); continue }
                 val obs = reader.read(b, rect, white)
                 // ждём, пока картинка устоится (нет анимации)
-                if (prev == null || mismatch(obs, prev) != 0) {
+                if (prev == null || mismatch(obs, prev) > 1) {
                     prev = obs
+                    setStatus("Жду, пока картинка устоится…")
                     nap(250)
                     continue
                 }
@@ -393,6 +415,7 @@ class BotService : Service() {
                         if (board.isMated) { setStatus("Мат. Партия окончена"); break }
                         if (board.isDraw) { setStatus("Ничья. Партия окончена"); break }
                     } else {
+                        setStatus("Не понял, что изменилось на доске (отличий: $diffCur). Жду…")
                         nap(300)
                         continue
                     }
@@ -400,7 +423,8 @@ class BotService : Service() {
 
                 if (board.sideToMove == mySide && pending == null) {
                     setStatus("Думаю…")
-                    val u = eng.bestMove(board.fen, Cfg.ms(this))
+                    val fen = board.fen
+                    val u = timed(Cfg.ms(this) / 1000L + 15) { eng.bestMove(fen, Cfg.ms(this)) }
                     if (u.length < 4) { setStatus("Нет хода от движка"); break }
                     val f = u.substring(0, 2).uppercase()
                     val t = u.substring(2, 4).uppercase()
@@ -423,10 +447,12 @@ class BotService : Service() {
                     pendingSince = System.currentTimeMillis()
                     clickMove(pending, rect, white) // ход не прошёл — пробуем ещё раз
                 }
+                if (board.sideToMove != mySide) setStatus("Жду хода соперника…")
                 nap(350)
             }
         } catch (e: Exception) {
-            setStatus("Ошибка: ${e.message}")
+            val m = e.cause?.message ?: e.message ?: e.javaClass.simpleName
+            setStatus("Ошибка: $m")
         } finally {
             running = false
             overlay?.clear()

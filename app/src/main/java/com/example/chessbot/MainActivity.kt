@@ -23,6 +23,7 @@ class MainActivity : Activity() {
     private val reqProjection = 1001
     private lateinit var elo: EditText
     private lateinit var ms: EditText
+    private lateinit var rbAuto: RadioButton
     private lateinit var rbWhite: RadioButton
     private lateinit var rbBlack: RadioButton
     private lateinit var auto: CheckBox
@@ -74,11 +75,17 @@ class MainActivity : Activity() {
         col.addView(ms)
         col.addView(tv("Я играю за:", 13f))
         val rg = RadioGroup(this).apply { orientation = LinearLayout.HORIZONTAL }
+        rbAuto = RadioButton(this).apply { text = "Авто"; id = View.generateViewId() }
         rbWhite = RadioButton(this).apply { text = "Белых"; id = View.generateViewId() }
         rbBlack = RadioButton(this).apply { text = "Чёрных"; id = View.generateViewId() }
+        rg.addView(rbAuto)
         rg.addView(rbWhite)
         rg.addView(rbBlack)
-        if (Cfg.white(this)) rbWhite.isChecked = true else rbBlack.isChecked = true
+        when (Cfg.colorMode(this)) {
+            1 -> rbWhite.isChecked = true
+            2 -> rbBlack.isChecked = true
+            else -> rbAuto.isChecked = true
+        }
         col.addView(rg)
         auto = CheckBox(this).apply {
             text = "Делать тапы автоматически (иначе только подсказка 1 → 2)"
@@ -90,8 +97,8 @@ class MainActivity : Activity() {
         col.addView(btn("Запустить бота") { start() })
         col.addView(
             tv(
-                "В шахматах: на плавающей панели жми «Калибр.» и тапни два угла доски, " +
-                    "затем в НАЧАЛЕ партии жми «Старт». Доска должна быть полностью видна.",
+                "В шахматах открой НОВУЮ партию и на плавающей панели жми «Старт» — " +
+                    "бот сам найдёт доску и твой цвет. «Калибр.» нужна только если автопоиск не справился.",
                 13f
             )
         )
@@ -107,7 +114,7 @@ class MainActivity : Activity() {
             this,
             elo.text.toString().toIntOrNull() ?: 0,
             (ms.text.toString().toIntOrNull() ?: 1000).coerceIn(100, 60000),
-            rbWhite.isChecked,
+            if (rbWhite.isChecked) 1 else if (rbBlack.isChecked) 2 else 0,
             auto.isChecked
         )
         val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager

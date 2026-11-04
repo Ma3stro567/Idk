@@ -69,6 +69,20 @@ class BoardReader {
     private fun rowCol(file: Int, rank: Int, white: Boolean): Pair<Int, Int> =
         if (white) Pair(7 - rank, file) else Pair(rank, 7 - file)
 
+    /** [сумма яркости, число пикселей] фигуры в клетке (для определения, белые внизу или чёрные). */
+    fun pieceLuma(bmp: Bitmap, rect: Rect, row: Int, col: Int): FloatArray {
+        val p = patch(bmp, rect, row, col)
+        var s = 0f
+        var n = 0
+        for (c in p.px) {
+            if (dist(c, p.bg) > 60) {
+                s += 0.299f * ((c shr 16) and 255) + 0.587f * ((c shr 8) and 255) + 0.114f * (c and 255)
+                n++
+            }
+        }
+        return floatArrayOf(s, n.toFloat())
+    }
+
     /** Запоминает вид фигур. Вызывать, когда на экране начальная позиция. */
     fun learn(bmp: Bitmap, rect: Rect, white: Boolean) {
         templates.clear()
