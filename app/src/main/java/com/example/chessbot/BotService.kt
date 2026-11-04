@@ -84,7 +84,7 @@ class BotService : Service() {
         projection = proj
         setupCapture(proj)
         setupUi()
-        setStatus("Готов. Открой партию и жми «Старт: мой ход» (или «его ход», если сейчас ходит соперник)")
+        setStatus("Готов. Открой партию и жми «▶ Мой ход» (или «▶ Его ход», если сейчас ходит соперник)")
         return START_NOT_STICKY
     }
 
@@ -191,11 +191,11 @@ class BotService : Service() {
         statusView = st
         col.addView(st)
         val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row1.addView(btn("Старт: мой ход") { startGame(false) })
-        row1.addView(btn("Старт: его ход") { startGame(true) })
+        row1.addView(btn("▶ Мой ход") { startGame(false) })
+        row1.addView(btn("▶ Его ход") { startGame(true) })
         col.addView(row1)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(btn("Стоп") { stopGame() })
+        row.addView(btn("⏸ Пауза") { pauseGame() })
         val ab = btn(if (Cfg.auto(this)) "Авто: вкл" else "Авто: выкл") {
             Cfg.setAuto(this, !Cfg.auto(this))
             autoBtn?.text = if (Cfg.auto(this)) "Авто: вкл" else "Авто: выкл"
@@ -236,8 +236,19 @@ class BotService : Service() {
         overlay?.clear()
     }
 
+    /** Пауза: бот ничего не делает на экране. Продолжить: «Мой ход» / «Его ход» — доска будет прочитана заново. */
+    private fun pauseGame() {
+        stopGame()
+        setStatus("Пауза. Выбери «▶ Мой ход» или «▶ Его ход» — бот заново прочитает доску и продолжит")
+    }
+
     private fun startGame(opponentFirst: Boolean) {
-        if (running) return
+        val old = worker
+        if (old != null && old.isAlive) {
+            // перезапуск (в том числе из паузы): дожидаемся, пока старый цикл завершится
+            running = false
+            try { old.join(2500) } catch (_: InterruptedException) {}
+        }
         running = true
         worker = Thread { runBot(opponentFirst) }.also { it.isDaemon = true; it.start() }
     }
@@ -295,6 +306,7 @@ class BotService : Service() {
             return
         }
         nap(280 + (Math.random() * 520).toLong()) // пауза между «взял» и «поставил» каждый раз разная
+        if (!running) return // поставили на паузу между тапами
         tap(b)
         if (m.promotion != Piece.NONE) {
             nap(450 + (Math.random() * 450).toLong())

@@ -159,10 +159,10 @@ class App:
             row=5, column=0, columnspan=2, sticky="w", pady=4)
         b = ttk.Frame(f)
         b.grid(row=6, column=0, columnspan=2, pady=4)
-        ttk.Button(b, text="Старт: мой ход", command=lambda: self.start(False)).grid(row=0, column=0, padx=2)
-        ttk.Button(b, text="Старт: его ход", command=lambda: self.start(True)).grid(row=0, column=1, padx=2)
-        ttk.Button(b, text="Стоп", command=self.stop).grid(row=0, column=2, padx=2)
-        self.status = tk.StringVar(value="Открой партию с видимой доской и жми «Старт».")
+        ttk.Button(b, text="▶ Мой ход", command=lambda: self.start(False)).grid(row=0, column=0, padx=2)
+        ttk.Button(b, text="▶ Его ход", command=lambda: self.start(True)).grid(row=0, column=1, padx=2)
+        ttk.Button(b, text="⏸ Пауза", command=self.pause).grid(row=0, column=2, padx=2)
+        self.status = tk.StringVar(value="Открой партию с видимой доской и жми «▶ Мой ход» (или «▶ Его ход»).")
         ttk.Label(f, textvariable=self.status, wraplength=360, justify="left").grid(
             row=7, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
@@ -285,6 +285,8 @@ class App:
         bx, by = self._human_point(bx + mon["left"], by + mon["top"], cell)
         self._click(ax, ay)
         time.sleep(random.uniform(0.28, 0.8))
+        if not self.running:
+            return  # поставили на паузу между кликами
         self._click(bx, by)
         if move.promotion:
             time.sleep(random.uniform(0.45, 0.9))
@@ -303,16 +305,21 @@ class App:
         save_cfg(self.cfg)
 
     def start(self, opponent_first):
-        if self.running:
-            return
+        # повторное нажатие (в т.ч. после паузы) перезапускает бота: доска находится и читается заново
+        old = self.worker
+        if old is not None and old.is_alive():
+            self.running = False
+            old.join(4)
         self._read_cfg()
         self.running = True
         self.worker = threading.Thread(target=self.run_bot, args=(opponent_first,), daemon=True)
         self.worker.start()
 
-    def stop(self):
+    def pause(self):
+        """Пауза: бот ничего не делает. «▶ Мой ход» / «▶ Его ход» — доска будет прочитана заново."""
         self.running = False
         self.clear_move()
+        self.set_status("Пауза. Выбери «▶ Мой ход» или «▶ Его ход» — бот заново прочитает доску и продолжит.")
 
     def quit(self):
         self.alive = self.running = False
