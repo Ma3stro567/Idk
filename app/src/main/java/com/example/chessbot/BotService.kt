@@ -123,11 +123,11 @@ class BotService : Service() {
     }
 
     /** Последний кадр экрана. Пока оверлей со стрелкой виден — на мгновение прячем его, чтобы он не мешал распознаванию. */
-    private fun grab(): Bitmap? {
-        val hide = overlay?.hasMarks == true
+    private fun grab(hidePanel: Boolean = false): Bitmap? {
+        val hide = overlay?.hasMarks == true || hidePanel
         if (hide) {
-            ui.post { overlay?.alpha = 0f }
-            nap(160)
+            ui.post { overlay?.alpha = 0f; if (hidePanel) panel?.alpha = 0f }
+            nap(200)
         }
         val img = imageReader?.acquireLatestImage()
         if (img != null) {
@@ -141,7 +141,7 @@ class BotService : Service() {
                 img.close()
             }
         }
-        if (hide) ui.post { overlay?.alpha = 1f }
+        if (hide) ui.post { overlay?.alpha = 1f; panel?.alpha = 1f }
         return lastBmp
     }
 
@@ -354,14 +354,19 @@ class BotService : Service() {
             if (empty > 0) sb.append(empty)
             if (rank > 0) sb.append('/')
         }
-        return sb.toString() + (if (whiteToMove) " w" else " b") + " - - 0 1"
+        val cs = StringBuilder()
+        if (obs[4] == 'K' && obs[7] == 'R') cs.append('K')
+        if (obs[4] == 'K' && obs[0] == 'R') cs.append('Q')
+        if (obs[60] == 'k' && obs[63] == 'r') cs.append('k')
+        if (obs[60] == 'k' && obs[56] == 'r') cs.append('q')
+        return sb.toString() + (if (whiteToMove) " w " else " b ") + (if (cs.isEmpty()) "-" else cs.toString()) + " - 0 1"
     }
 
     private fun runBot(opponentFirst: Boolean) {
         try {
             var bmp: Bitmap? = null
             for (i in 0 until 20) {
-                bmp = grab()
+                bmp = grab(true) // на время первого снимка прячем панель, чтобы она не закрывала доску
                 if (bmp != null) break
                 nap(150)
             }
@@ -392,30 +397,35 @@ class BotService : Service() {
                 val tmp = reader.read(bmp, rect, true)
                 white = modeWhite ?: reader.whiteAtBottom(tmp) ?: BoardFinder.whiteAtBottom(bmp, rect)
                 obs = reader.read(bmp, rect, white)
-                startPos = mismatch(obs, expectedStart) <= 2
+                startPos = mismatch(obs, expectedStart) <= 1
             } else {
                 white = modeWhite ?: BoardFinder.whiteAtBottom(bmp, rect)
             }
 
             val board = Board()
             if (!hadTemplates || (!startPos && !midGameOk(obs!!))) {
-                // шаблонов нет (или они не подходят): учимся на начальной позиции
-                reader.learn(bmp, rect, white)
-                obs = reader.read(bmp, rect, white)
-                val bad = mismatch(obs, expectedStart)
-                if (bad > 2) {
+                // шаблонов нет (или они не подходят): учимся на (почти) начальной позиции
+                var learned = false
+                var bad = 0
+                for (set in 0..1) {
+                    reader.learn(bmp, rect, white, set)
+                    obs = reader.read(bmp, rect, white)
+                    bad = mismatch(obs, expectedStart)
+                    if (bad <= 4) { learned = true; break }
+                }
+                if (!learned) {
                     reader.clear()
                     setStatus(
-                        "Не узнаю фигуры. Бот должен ОДИН РАЗ увидеть начальную позицию (любая новая партия " +
-                            "или редактор доски, где фигуры стоят как в начале), чтобы запомнить вид фигур. " +
-                            "Дальше можно стартовать посреди партии. (ошибок: $bad из 32, кадр ${bmp.width}x${bmp.height}, " +
-                            "доска $rect, я за ${if (white) "белых" else "чёрных"}). Бот видит:\n${gridText(obs, white)}"
+                        "Не узнаю фигуры. Бот должен ОДИН РАЗ увидеть начальную позицию (новая партия, " +
+                            "максимум пара ходов), чтобы запомнить вид фигур. Потом можно стартовать с любого места. " +
+                            "(ошибок: $bad, кадр ${bmp.width}x${bmp.height}, доска $rect, " +
+                            "я за ${if (white) "белых" else "чёрных"}). Бот видит:\n${gridText(obs!!, white)}"
                     )
                     running = false
                     return
                 }
                 reader.save(tplFile)
-                startPos = true
+                startPos = mismatch(obs!!, expectedStart) <= 1
             }
 
             val mySide = if (white) Side.WHITE else Side.BLACK
@@ -429,7 +439,7 @@ class BotService : Service() {
             setStatus(
                 (if (found != null) "Доска найдена" else "Доска из калибровки") +
                     ", я за ${if (white) "белых" else "чёрных"}" +
-                    (if (startPos) ", новая партия" else ", партия с середины (рокировка не учитывается)")
+                    (if (startPos) ", новая партия" else ", партия с середины (права на рокировку угаданы по расстановке)")
             )
 
             if (engine == null) {

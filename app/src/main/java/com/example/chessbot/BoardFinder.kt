@@ -63,15 +63,66 @@ object BoardFinder {
 
         var best: Rect? = null
         var bestScore = 0.0
+        var bestA = 0
+        var bestB = 0
         for (i in cands.indices) for (j in i + 1 until cands.size) {
             val a = cands[i]
             val b = cands[j]
             if (d(a, b) < 15) continue
             val r = candidate(px, w, h, a, b) ?: continue
             val sc = verify(bmp, r, a, b)
-            if (sc > bestScore) { bestScore = sc; best = r }
+            if (sc > bestScore) { bestScore = sc; best = r; bestA = a; bestB = b }
         }
-        return if (bestScore >= 0.8) best else null
+        val rough = best
+        return if (bestScore >= 0.8 && rough != null) refine(bmp, rough, bestA, bestB) else null
+    }
+
+    /** Точность до пикселя: двигаем каждый край доски там, где углы клеток лучше всего ложатся в шахматный узор. */
+    private fun refine(bmp: Bitmap, r0: Rect, a: Int, b: Int): Rect {
+        var l = r0.left
+        var t = r0.top
+        var rr = r0.right
+        var bb = r0.bottom
+        fun edge(cur: Int, f: (Int) -> Double): Int {
+            var best = -1.0
+            val hits = ArrayList<Int>()
+            for (dlt in -56..56 step 2) {
+                val sc = f(cur + dlt)
+                if (sc > best + 1e-9) { best = sc; hits.clear(); hits.add(cur + dlt) }
+                else if (abs(sc - best) <= 1e-9) hits.add(cur + dlt)
+            }
+            return hits.average().toInt()
+        }
+        repeat(2) {
+            l = edge(l) { v -> if (rr - v < 100) 0.0 else sharp(bmp, Rect(v, t, rr, bb), a, b) }
+            t = edge(t) { v -> if (bb - v < 100) 0.0 else sharp(bmp, Rect(l, v, rr, bb), a, b) }
+            rr = edge(rr) { v -> if (v - l < 100) 0.0 else sharp(bmp, Rect(l, t, v, bb), a, b) }
+            bb = edge(bb) { v -> if (v - t < 100) 0.0 else sharp(bmp, Rect(l, t, rr, v), a, b) }
+        }
+        val size = ((rr - l) + (bb - t)) / 2
+        return Rect(l, t, l + size, t + size)
+    }
+
+    /** Как verify, но точки у самых углов клеток (3% от края): чувствительно к сдвигу границ. */
+    private fun sharp(bmp: Bitmap, r: Rect, a: Int, b: Int): Double {
+        val cw = r.width() / 8f
+        val ch = r.height() / 8f
+        var okA = 0
+        var okB = 0
+        val offs = floatArrayOf(0.03f, 0.97f)
+        for (row in 0..7) for (col in 0..7) {
+            val aFirst = (row + col) % 2 == 0
+            for (ox in offs) for (oy in offs) {
+                val x = (r.left + (col + ox) * cw).toInt().coerceIn(0, bmp.width - 1)
+                val y = (r.top + (row + oy) * ch).toInt().coerceIn(0, bmp.height - 1)
+                val p = bmp.getPixel(x, y)
+                val nearA = d(p, a) <= 24
+                val nearB = d(p, b) <= 24
+                if ((aFirst && nearA) || (!aFirst && nearB)) okA++
+                if ((aFirst && nearB) || (!aFirst && nearA)) okB++
+            }
+        }
+        return max(okA, okB) / 256.0
     }
 
     private fun candidate(px: IntArray, w: Int, h: Int, a: Int, b: Int): Rect? {

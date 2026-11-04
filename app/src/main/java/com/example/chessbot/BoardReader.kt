@@ -137,14 +137,23 @@ class BoardReader {
         return floatArrayOf(s, n.toFloat())
     }
 
-    /** Запоминает вид фигур. Вызывать, когда на экране начальная позиция. */
-    fun learn(bmp: Bitmap, rect: Rect, white: Boolean) {
+    /**
+     * Запоминает вид фигур с экрана, где стоит (почти) начальная позиция.
+     * set 0 — берём фигуры с клеток a1,b1,c1,d1,e1 + пешка d; set 1 — с h1,g1,f1,d1,e1 + пешка f.
+     * Так учёба работает и после первых ходов (если ходили фигурами из другой половины).
+     */
+    fun learn(bmp: Bitmap, rect: Rect, white: Boolean, set: Int = 0) {
         templates.clear()
-        val reps = mapOf(
-            'P' to Pair(4, 1), 'N' to Pair(1, 0), 'B' to Pair(2, 0),
+        val reps = if (set == 0) mapOf(
+            'P' to Pair(3, 1), 'N' to Pair(1, 0), 'B' to Pair(2, 0),
             'R' to Pair(0, 0), 'Q' to Pair(3, 0), 'K' to Pair(4, 0),
-            'p' to Pair(4, 6), 'n' to Pair(1, 7), 'b' to Pair(2, 7),
+            'p' to Pair(3, 6), 'n' to Pair(1, 7), 'b' to Pair(2, 7),
             'r' to Pair(0, 7), 'q' to Pair(3, 7), 'k' to Pair(4, 7)
+        ) else mapOf(
+            'P' to Pair(5, 1), 'N' to Pair(6, 0), 'B' to Pair(5, 0),
+            'R' to Pair(7, 0), 'Q' to Pair(3, 0), 'K' to Pair(4, 0),
+            'p' to Pair(5, 6), 'n' to Pair(6, 7), 'b' to Pair(5, 7),
+            'r' to Pair(7, 7), 'q' to Pair(3, 7), 'k' to Pair(4, 7)
         )
         for ((c, fr) in reps) {
             val (row, col) = rowCol(fr.first, fr.second, white)
