@@ -378,7 +378,8 @@ class BotService : Service() {
 
             setStatus("Ищу доску на экране…")
             val found = BoardFinder.find(bmp)
-            val rect = found ?: Cfg.rect(this)
+            val manual = Cfg.rect(this)?.let { BoardFinder.refineManual(bmp, it) }
+            val rect = found ?: manual
             if (rect == null) {
                 setStatus("Не нашёл доску. Открой партию так, чтобы доска была видна целиком, или нажми «Калибр.»")
                 running = false

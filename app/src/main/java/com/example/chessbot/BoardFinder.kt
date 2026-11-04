@@ -63,18 +63,28 @@ object BoardFinder {
 
         var best: Rect? = null
         var bestScore = 0.0
-        var bestA = 0
-        var bestB = 0
         for (i in cands.indices) for (j in i + 1 until cands.size) {
             val a = cands[i]
             val b = cands[j]
             if (d(a, b) < 15) continue
-            val r = candidate(px, w, h, a, b) ?: continue
-            val sc = verify(bmp, r, a, b)
-            if (sc > bestScore) { bestScore = sc; best = r; bestA = a; bestB = b }
+            val r0 = candidate(px, w, h, a, b) ?: continue
+            val r = refine(bmp, r0, a, b)
+            val sc = sharp(bmp, r, a, b)
+            if (sc > bestScore) { bestScore = sc; best = r }
         }
-        val rough = best
-        return if (bestScore >= 0.8 && rough != null) refine(bmp, rough, bestA, bestB) else null
+        return if (bestScore >= 0.75) best else null
+    }
+
+    /** Уточняет рамку, заданную вручную (калибровкой): цвета клеток берём прямо с экрана. */
+    fun refineManual(bmp: Bitmap, r: Rect): Rect {
+        val cw = r.width() / 8f
+        val ch = r.height() / 8f
+        fun px(col: Int, row: Int): Int {
+            val x = (r.left + (col + 0.5f) * cw).toInt().coerceIn(0, bmp.width - 1)
+            val y = (r.top + (row + 0.1f) * ch).toInt().coerceIn(0, bmp.height - 1)
+            return bmp.getPixel(x, y)
+        }
+        return refine(bmp, r, px(0, 0), px(1, 0))
     }
 
     /** Точность до пикселя: двигаем каждый край доски там, где углы клеток лучше всего ложатся в шахматный узор. */
@@ -153,29 +163,6 @@ object BoardFinder {
         if (abs(bw - bh) > 0.08 * max(bw, bh)) return null
         val size = (bw + bh) / 2
         return Rect(left, top, left + size, top + size)
-    }
-
-    /** Доля клеток, где фон в углах соответствует шахматному чередованию двух цветов. */
-    private fun verify(bmp: Bitmap, r: Rect, a: Int, b: Int): Double {
-        val cell = r.width() / 8f
-        var okA = 0
-        var okB = 0
-        val offs = floatArrayOf(0.12f, 0.88f)
-        for (row in 0..7) for (col in 0..7) {
-            var va = 0 // сколько углов похожи на a
-            var vb = 0
-            for (ox in offs) for (oy in offs) {
-                val x = (r.left + (col + ox) * cell).toInt().coerceIn(0, bmp.width - 1)
-                val y = (r.top + (row + oy) * cell).toInt().coerceIn(0, bmp.height - 1)
-                val p = bmp.getPixel(x, y)
-                if (d(p, a) <= 24) va++
-                if (d(p, b) <= 24) vb++
-            }
-            val aFirst = (row + col) % 2 == 0
-            if ((aFirst && va >= 3) || (!aFirst && vb >= 3)) okA++
-            if ((aFirst && vb >= 3) || (!aFirst && va >= 3)) okB++
-        }
-        return max(okA, okB) / 64.0
     }
 
     /**

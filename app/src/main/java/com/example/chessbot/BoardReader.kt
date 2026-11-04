@@ -53,7 +53,7 @@ class BoardReader {
             )
         }
         // фон клетки = медиана пикселей из 4 углов (там фигур нет)
-        val fs = floatArrayOf(0.04f, 0.06f, 0.08f, 0.92f, 0.94f, 0.96f)
+        val fs = floatArrayOf(0.07f, 0.09f, 0.11f, 0.89f, 0.91f, 0.93f)
         val rs = IntArray(36)
         val gs = IntArray(36)
         val bs = IntArray(36)
@@ -168,6 +168,7 @@ class BoardReader {
         var s0 = 0
         for (i in 0 until n) s0 += dist(p.px[i], p.bg)
         var bestD = s0.toFloat() / n
+        if (bestD < 22f) return ' ' // клетка почти целиком цвета фона — пусто
         var best = ' '
         for ((c, t) in templates) {
             var s = 0
